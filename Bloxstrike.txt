@@ -1,0 +1,230 @@
+-- ================================================
+-- Bloxstrike - Mixed ESP + Bomb Timer
+-- Full Player ESP (like your big script) + Bomb Timer + Bomb Name ESP
+-- Master hotkey now properly unchecks everything
+-- ================================================
+
+menu.add_tab("Bloxstrike", "B")
+menu.add_group("Bloxstrike", "Visuals")
+
+-- Master with custom hotkey
+menu.add_checkbox("Bloxstrike", "Visuals", "master_enabled", "Master Enable", true, { key = 0x23 }) -- Default End Key
+
+-- Player ESP (from your script)
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_teamcheck", "Team Check (CT/T)", true, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_box", "Enable Player Box", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_box_fill", "Player Box Filled", {0, 0, 0, 0.3}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_name", "Enable Player Name", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_name_color", "Name Color", {1, 1, 1, 1}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_distance", "Enable Player Distance", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_distance_color", "Distance Color", {1, 1, 1, 1}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_health", "Enable Player Health", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_health_color", "Health Color", {0, 1, 0, 1}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_skeleton", "Enable Player Skeleton", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_skeleton_color", "Skeleton Color", {1, 1, 1, 1}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "esp_meshchams", "Enable Mesh Chams", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_meshchams_color", "Mesh Chams Color", {0, 1, 0, 0.7}, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "esp_meshchams2", "Mesh Chams Gradient", {0, 0.5, 1, 0.7}, {parent = "master_enabled"})
+
+-- Bomb Specific
+menu.add_checkbox("Bloxstrike", "Visuals", "bomb_box_enabled", "Bomb Box", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "bomb_box_color", "Bomb Box Color", {1, 0.5, 0, 1}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "bomb_name_enabled", "Bomb Name", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "bomb_name_color", "Bomb Name Color", {1, 1, 1, 1}, {parent = "master_enabled"})
+
+menu.add_checkbox("Bloxstrike", "Visuals", "bomb_timer_enabled", "40s Bomb Timer", true, {parent = "master_enabled"})
+menu.add_colorpicker("Bloxstrike", "Visuals", "bomb_timer_color", "Bomb Timer Color", {1, 1, 0, 1}, {parent = "master_enabled"})
+
+-- Master callback - unchecks everything when master is disabled
+menu.set_callback("master_enabled", function(enabled)
+    if not enabled then
+        local subs = {"esp_teamcheck", "esp_box", "esp_box_fill", "esp_name", "esp_distance", "esp_health", "esp_skeleton", 
+                      "esp_meshchams", "esp_meshchams2", "bomb_box_enabled", "bomb_name_enabled", "bomb_timer_enabled"}
+        for _, id in ipairs(subs) do
+            menu.set(id, false)
+        end
+    end
+end)
+
+local r15_connections = {
+    {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+    {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+    {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+    {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+    {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+}
+
+local r6_connections = {
+    {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
+}
+
+local function get_team(character)
+    if not character or not utility.is_valid(character) then return nil end
+    local current = character
+    while current and utility.is_valid(current) do
+        if current.Name == "Counter-Terrorists" then return "CT" end
+        if current.Name == "Terrorists" then return "T" end
+        current = current.Parent
+    end
+    return nil
+end
+
+local debris = nil
+local character_folder = nil
+local timer_start = 0
+local last_folder = false
+
+-- Draggable timer
+local timer_x = 1350
+local timer_y = 40
+local dragging = false
+local drag_offset_x = 0
+local drag_offset_y = 0
+
+function on_frame()
+    if not menu.get("master_enabled") then 
+        last_folder = false
+        return 
+    end
+
+    local lp = entity.get_local_player()
+    local local_team = lp and get_team(lp.character) or nil
+
+    -- Player ESP
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local or not p.is_alive then goto continue end
+
+        if menu.get("esp_teamcheck") then
+            local p_team = get_team(p.character)
+            if local_team and p_team and p_team == local_team then goto continue end
+        end
+
+        local bounds = p:get_bounds()
+        if not bounds.valid then goto continue end
+
+        if menu.get("esp_meshchams") then
+            draw.chams_player(p, menu.get_color("esp_meshchams"), menu.get_color("esp_meshchams2"), 0)
+        end
+
+        if menu.get("esp_box") then
+            draw.rect_filled(bounds.x, bounds.y, bounds.w, bounds.h, menu.get_color("esp_box_fill"), 0)
+            draw.box(bounds.x, bounds.y, bounds.w, bounds.h, menu.get_color("esp_box"))
+        end
+
+        if menu.get("esp_skeleton") then
+            local rig = p.rig_type
+            local connections = (rig == "R6") and r6_connections or r15_connections
+            local bones = p:get_bones_screen()
+            for _, conn in ipairs(connections) do
+                local a = bones[conn[1]]
+                local b = bones[conn[2]]
+                if a and b then
+                    draw.line(a[1], a[2], b[1], b[2], menu.get_color("esp_skeleton"), 1.5)
+                end
+            end
+        end
+
+        if menu.get("esp_name") then
+            local tw, th = draw.get_text_size(p.name, 14)
+            draw.text(bounds.x + bounds.w / 2 - tw / 2, bounds.y - th - 4, p.name, menu.get_color("esp_name"), 14)
+        end
+
+        if menu.get("esp_distance") then
+            local dist = math.floor(p:distance_to())
+            local dist_text = "[" .. dist .. "m]"
+            local dt_w, dt_h = draw.get_text_size(dist_text, 13)
+            draw.text(bounds.x + bounds.w / 2 - dt_w / 2, bounds.y + bounds.h + 6, dist_text, menu.get_color("esp_distance"), 13)
+        end
+
+        if menu.get("esp_health") then
+            draw.health_bar(bounds.x - 6, bounds.y, bounds.h, p.health, p.max_health)
+        end
+
+        ::continue::
+    end
+
+    -- Bomb Detection + Timer + Bomb ESP
+    if not utility.is_valid(debris) then
+        local ws = game.workspace
+        if utility.is_valid(ws) then
+            debris = ws:find_first_child("Debris")
+        end
+    end
+
+    if not utility.is_valid(character_folder) and utility.is_valid(debris) then
+        character_folder = debris:find_first_child("Character")
+    end
+
+    local bomb_present = utility.is_valid(character_folder)
+
+    if menu.get("bomb_timer_enabled") and bomb_present then
+        if not last_folder then
+            timer_start = utility.get_time()
+        end
+
+        local elapsed = utility.get_time() - timer_start
+        local remaining = math.max(0, 40 - elapsed)
+        local timer_text = string.format("BOMB: %.1fs", remaining)
+
+        local tx = timer_x
+        local ty = timer_y
+        draw.text(tx, ty, timer_text, menu.get_color("bomb_timer_color"), 28)
+
+        -- Dragging
+        local mx, my = utility.get_mouse_pos()
+        local tw, th = draw.get_text_size(timer_text, 28)
+
+        if input.is_key_down(0x01) then
+            if not dragging and mx >= tx and mx <= tx + tw and my >= ty and my <= ty + th + 20 then
+                dragging = true
+                drag_offset_x = mx - tx
+                drag_offset_y = my - ty
+            end
+        else
+            dragging = false
+        end
+
+        if dragging then
+            timer_x = mx - drag_offset_x
+            timer_y = my - drag_offset_y
+        end
+    end
+
+    if bomb_present and (menu.get("bomb_box_enabled") or menu.get("bomb_name_enabled")) then
+        local models = character_folder:get_children()
+
+        for _, bomb in ipairs(models) do
+            if not utility.is_valid(bomb) or not bomb:is_a("Model") then goto skip end
+
+            local root = bomb.PrimaryPart or bomb:find_first_child("Head") or bomb:find_first_child_of_class("BasePart")
+            if not utility.is_valid(root) then goto skip end
+
+            local sx, sy, onscreen = draw.world_to_screen(root.Position.x, root.Position.y, root.Position.z)
+            if not onscreen then goto skip end
+
+            local offset = 38
+
+            if menu.get("bomb_box_enabled") then
+                draw.box(sx - offset, sy - offset*2, offset*2, offset*4, menu.get_color("bomb_box_color"), 0, 0)
+            end
+
+            if menu.get("bomb_name_enabled") then
+                local color = menu.get_color("bomb_name_color")
+                local tw, th = draw.get_text_size("Bomb", 18)
+                draw.text(sx - tw/2, sy - offset*2.4, "Bomb", color, 18)
+            end
+
+            ::skip::
+        end
+    end
+
+    last_folder = bomb_present
+end
